@@ -171,6 +171,9 @@
   .loc-cell.work { background: rgba(0,122,255,0.18); }
   .loc-cell.go { background: rgba(255,149,0,0.18); }
   .loc-cell:active { transform: scale(0.92); }
+  .slider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 3px; background: var(--fill); outline: none; margin: 16px 0 6px; }
+  .slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 0.5px solid rgba(0,0,0,0.12); box-shadow: 0 1px 4px rgba(0,0,0,0.3); cursor: pointer; }
+  .slider::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: #fff; border: none; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
 
   /* Shopping item */
   .shop-item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 0.5px solid var(--hair); }
@@ -417,14 +420,15 @@ S.profile = S.profile || {};
 if(!S.profile.goal) S.profile.goal = "lose";
 if(!("goalCustom" in S.profile)) S.profile.goalCustom = "";
 if(!S.profile.windowStart) S.profile.windowStart = "10:00";
-if(!S.profile.windowEnd) S.profile.windowEnd = "20:00";
+if(!S.profile.fastHours) S.profile.fastHours = (S.profile.windowStart && S.profile.windowEnd) ? Math.min(20,Math.max(12, Math.round(24 - hoursBetween(S.profile.windowStart, S.profile.windowEnd)))) : 14;
 if(!S.profile.meals) S.profile.meals = [
-  {id:"breakfast", label:"Breakfast", time:"10:30", type:"meal"},
-  {id:"lunch",     label:"Lunch",     time:"14:00", type:"meal"},
-  {id:"dinner",    label:"Dinner",    time:"19:00", type:"meal"},
+  {id:"breakfast", label:"Breakfast", type:"meal"},
+  {id:"lunch",     label:"Lunch",     type:"meal"},
+  {id:"dinner",    label:"Dinner",    type:"meal"},
 ];
 if(!S.profile.schedule) S.profile.schedule = {};   // mealId -> [7 locations Mon..Sun]
 ensureSchedule();
+recomputeMealTimes();
 
 /* ---------------- NAV ---------------- */
 let curTab = "plan", curDay = 0;
@@ -742,7 +746,7 @@ tags: [meal-feedback, preferences]
 
 ## Profile (local; shared only via this export)
 - Goal: ${goalText}
-- Eating window: ${fmtTime(pf.windowStart)} – ${fmtTime(pf.windowEnd)}
+- Eating window: ${fmtTime(pf.windowStart)} – ${fmtTime(windowEnd())} (${eatHours()}h eating · ${pf.fastHours}h fast)
 - Meals & times: ${mealsLine}
 - Weekly eating locations:
 ${locLines}
@@ -793,9 +797,32 @@ function ensureSchedule(){
 }
 function fmtTime(t){ if(!t) return ""; const p=String(t).split(":"); let h=+p[0], m=+p[1]||0; const ap=h<12?"AM":"PM"; let hh=h%12; if(hh===0)hh=12; return hh+":"+String(m).padStart(2,"0")+" "+ap; }
 function pmTime(id){ const mm=(S.profile.meals||[]).find(x=>x.id===id); return mm?mm.time:""; }
-function sortedMeals(){ return (S.profile.meals||[]).slice().sort((a,b)=>(a.time||"").localeCompare(b.time||"")); }
+function sortedMeals(){ return (S.profile.meals||[]).slice(); }
 function hoursBetween(a,b){ const pa=(a||"0:0").split(":"), pb=(b||"0:0").split(":"); let d=(+pb[0]*60+ +pb[1])-(+pa[0]*60+ +pa[1]); if(d<0)d+=1440; return Math.round(d/60*10)/10; }
-function eatHours(){ return hoursBetween(S.profile.windowStart,S.profile.windowEnd); }
+function toMin(t){ const p=String(t||"0:0").split(":"); return (+p[0])*60+(+p[1]||0); }
+function toHHMM(m){ m=((Math.round(m)%1440)+1440)%1440; return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); }
+function eatHours(){ return 24 - (S.profile.fastHours||14); }
+function windowEnd(){ return toHHMM(toMin(S.profile.windowStart) + eatHours()*60); }
+function winReadout(){ return `🍽️ Eat ${fmtTime(S.profile.windowStart)} – ${fmtTime(windowEnd())} · <b>${eatHours()}-hour window</b>`; }
+function recomputeMealTimes(){
+  const meals=S.profile.meals||[]; const start=toMin(S.profile.windowStart); const eatMin=eatHours()*60; const n=meals.length;
+  meals.forEach((m,i)=>{ if(m.auto===false && m.manual){ m.time=m.manual; return; } const frac=n<=1?0:i/(n-1); m.time=toHHMM(start+Math.round(frac*eatMin/5)*5); });
+}
+function mealsCardInner(){
+  let h="";
+  S.profile.meals.forEach(m=>{
+    const pinned=m.auto===false;
+    h += `<div class="fav-item">
+      <div class="grow"><span class="sb">${m.label}</span>${m.type==="snack"?` <span class="tiny" style="color:var(--green)">snack</span>`:""}</div>
+      <input type="time" class="time-in" value="${m.time}" onchange="setMealTime('${m.id}',this.value)">
+      ${pinned?`<button class="rm" title="Back to auto" style="color:var(--green)" onclick="setAuto('${m.id}')">↺</button>`:`<span class="tiny muted" style="width:34px;text-align:center">auto</span>`}
+      ${m.type==="snack"?`<button class="rm" onclick="removeMeal('${m.id}')">✕</button>`:""}
+    </div>`;
+  });
+  h += `<button class="btn sec" style="margin-top:10px" onclick="addSnack()">+ Add snack</button>
+    <div class="muted tiny" style="text-align:center;margin-top:8px">Times auto-space to your window. Edit a time to pin it; ↺ returns it to auto.</div>`;
+  return h;
+}
 function locIcon(l){ return l==="home"?"🏠":l==="work"?"💼":l==="go"?"🚗":"·"; }
 function shortLabel(m){ if(m.type==="snack") return "Snack"; return {breakfast:"Bfast",lunch:"Lunch",dinner:"Dinner"}[m.id]||m.label; }
 
@@ -813,23 +840,18 @@ function renderProfile(){
     ${p.goal==="custom"?`<input type="text" placeholder="Describe your goal" value="${(p.goalCustom||"").replace(/"/g,"&quot;")}" oninput="S.profile.goalCustom=this.value;save()" style="width:100%;border:none;background:var(--fill-2);border-radius:11px;padding:12px 13px;font-size:15px;color:var(--text);font-family:inherit;margin-top:8px;box-sizing:border-box">`:""}
   </div>`;
 
-  // Eating window
-  html += `<div class="seclabel">Eating window</div><div class="card">
-    <div class="row spread"><span class="sb">Start</span><input type="time" class="time-in" value="${p.windowStart}" onchange="setWindow('start',this.value)"></div>
-    <div class="row spread" style="margin-top:10px"><span class="sb">End</span><input type="time" class="time-in" value="${p.windowEnd}" onchange="setWindow('end',this.value)"></div>
-    <div class="muted small" style="margin-top:8px">${eatHours()}-hour eating window · ${Math.round((24-eatHours())*10)/10}-hour fast.</div>
+  // Intermittent fasting (slider) + break-fast time
+  const fast = p.fastHours, pct = (fast-12)/8*100;
+  html += `<div class="seclabel">Intermittent fasting</div><div class="card">
+    <div class="row spread"><span class="sb">Fasting window</span><span id="fast-label" class="b" style="font-size:18px;color:var(--green)">${fast}h fast</span></div>
+    <input id="fast-slider" type="range" class="slider" min="12" max="20" step="1" value="${fast}" oninput="liveFast(this.value)" style="background:linear-gradient(90deg,var(--green) ${pct}%, var(--fill) ${pct}%)">
+    <div class="row spread tiny muted"><span>12h fast</span><span>20h fast</span></div>
+    <div class="row spread" style="margin-top:12px"><span class="sb">Break fast at</span><input type="time" class="time-in" value="${p.windowStart}" onchange="setStart(this.value)"></div>
+    <div id="win-readout" class="muted small" style="margin-top:10px">${winReadout()}</div>
   </div>`;
 
-  // Meals & times
-  html += `<div class="seclabel">Meals & times</div><div class="card">`;
-  sortedMeals().forEach(m=>{
-    html += `<div class="fav-item">
-      <div class="grow"><span class="sb">${m.label}</span>${m.type==="snack"?` <span class="tiny" style="color:var(--green)">snack</span>`:""}</div>
-      <input type="time" class="time-in" value="${m.time}" onchange="setMealTime('${m.id}',this.value)">
-      ${m.type==="snack"?`<button class="rm" onclick="removeMeal('${m.id}')">✕</button>`:`<span style="width:34px;display:inline-block"></span>`}
-    </div>`;
-  });
-  html += `<button class="btn sec" style="margin-top:10px" onclick="addSnack()">+ Add snack</button></div>`;
+  // Meal times (auto-spaced, with manual override)
+  html += `<div class="seclabel">Meal times <span class="muted" style="font-weight:400;text-transform:none">· auto-spaced</span></div><div id="meals-card" class="card">${mealsCardInner()}</div>`;
 
   // Weekly location
   html += `<div class="seclabel">Weekly location</div><div class="card">
@@ -846,10 +868,19 @@ function renderProfile(){
   el.innerHTML = html;
 }
 function setGoal(v){ S.profile.goal=v; save(); renderProfile(); }
-function setWindow(which,v){ if(which==="start")S.profile.windowStart=v; else S.profile.windowEnd=v; save(); renderProfile(); }
-function setMealTime(id,v){ const m=(S.profile.meals||[]).find(x=>x.id===id); if(m)m.time=v; save(); renderProfile(); }
-function addSnack(){ S.profile.meals.push({id:"snack-"+Date.now(), label:"Snack", time:"16:00", type:"snack"}); ensureSchedule(); save(); renderProfile(); }
-function removeMeal(id){ S.profile.meals=(S.profile.meals||[]).filter(m=>m.id!==id); delete S.profile.schedule[id]; save(); renderProfile(); }
+function liveFast(v){
+  S.profile.fastHours=+v; recomputeMealTimes(); save();
+  const fast=S.profile.fastHours, pct=(fast-12)/8*100;
+  const lbl=document.getElementById("fast-label"); if(lbl) lbl.textContent=fast+"h fast";
+  const sl=document.getElementById("fast-slider"); if(sl) sl.style.background=`linear-gradient(90deg,var(--green) ${pct}%, var(--fill) ${pct}%)`;
+  const win=document.getElementById("win-readout"); if(win) win.innerHTML=winReadout();
+  const mc=document.getElementById("meals-card"); if(mc) mc.innerHTML=mealsCardInner();
+}
+function setStart(v){ S.profile.windowStart=v; recomputeMealTimes(); save(); renderProfile(); }
+function setMealTime(id,v){ const m=(S.profile.meals||[]).find(x=>x.id===id); if(m){ m.manual=v; m.auto=false; m.time=v; } save(); renderProfile(); }
+function setAuto(id){ const m=(S.profile.meals||[]).find(x=>x.id===id); if(m){ m.auto=true; delete m.manual; } recomputeMealTimes(); save(); renderProfile(); }
+function addSnack(){ const meals=S.profile.meals; meals.splice(Math.max(1,meals.length-1),0,{id:"snack-"+Date.now(), label:"Snack", type:"snack", auto:true}); ensureSchedule(); recomputeMealTimes(); save(); renderProfile(); }
+function removeMeal(id){ S.profile.meals=(S.profile.meals||[]).filter(m=>m.id!==id); delete S.profile.schedule[id]; recomputeMealTimes(); save(); renderProfile(); }
 function cycleLoc(id,di){ ensureSchedule(); const order=["","home","work","go"]; const cur=S.profile.schedule[id][di]||""; S.profile.schedule[id][di]=order[(order.indexOf(cur)+1)%order.length]; save(); renderProfile(); }
 
 /* ---------------- SHEET ---------------- */
