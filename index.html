@@ -161,6 +161,17 @@
   .rm:active { transform: scale(0.9); }
   .store-pill { display: inline-block; font-size: 12px; font-weight: 700; color: var(--text-2); background: var(--fill); padding: 4px 10px; border-radius: 20px; }
 
+  /* Profile */
+  .time-in { border: none; background: var(--fill); color: var(--text); font-family: inherit; font-size: 15px; font-weight: 600; padding: 8px 10px; border-radius: 9px; }
+  .loc-grid { display: grid; grid-template-columns: 58px repeat(7, 1fr); gap: 4px; align-items: center; }
+  .loc-head { font-size: 11px; font-weight: 700; color: var(--text-2); text-align: center; }
+  .loc-row-label { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .loc-cell { border: none; background: var(--fill); border-radius: 7px; height: 34px; font-size: 15px; display: grid; place-items: center; padding: 0; color: var(--text-3); }
+  .loc-cell.home { background: rgba(52,199,89,0.18); }
+  .loc-cell.work { background: rgba(0,122,255,0.18); }
+  .loc-cell.go { background: rgba(255,149,0,0.18); }
+  .loc-cell:active { transform: scale(0.92); }
+
   /* Shopping item */
   .shop-item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 0.5px solid var(--hair); }
   .shop-item:last-child { border-bottom: none; }
@@ -239,6 +250,8 @@
     <section class="panel" id="panel-shop"></section>
     <!-- PREFS -->
     <section class="panel" id="panel-prefs"></section>
+    <!-- PROFILE -->
+    <section class="panel" id="panel-profile"></section>
   </main>
 </div>
 
@@ -250,6 +263,7 @@
   <button data-tab="recipes" onclick="go('recipes')"><span class="ic">📖</span>Recipes</button>
   <button data-tab="shop" onclick="go('shop')"><span class="ic">🛒</span>Shop</button>
   <button data-tab="prefs" onclick="go('prefs')"><span class="ic">⭐</span>Prefs</button>
+  <button data-tab="profile" onclick="go('profile')"><span class="ic">👤</span>Profile</button>
 </div></nav>
 
 <script>
@@ -398,6 +412,19 @@ S.notes    = S.notes    || "";
 S.customStores = S.customStores || [];   // user-added store names
 S.customItems  = S.customItems  || [];   // user-added favorite ingredients [{name}]
 S.favMeals     = S.favMeals     || [];   // user-added favorite meals [{name, store}]
+// Profile (all local-only)
+S.profile = S.profile || {};
+if(!S.profile.goal) S.profile.goal = "lose";
+if(!("goalCustom" in S.profile)) S.profile.goalCustom = "";
+if(!S.profile.windowStart) S.profile.windowStart = "10:00";
+if(!S.profile.windowEnd) S.profile.windowEnd = "20:00";
+if(!S.profile.meals) S.profile.meals = [
+  {id:"breakfast", label:"Breakfast", time:"10:30", type:"meal"},
+  {id:"lunch",     label:"Lunch",     time:"14:00", type:"meal"},
+  {id:"dinner",    label:"Dinner",    time:"19:00", type:"meal"},
+];
+if(!S.profile.schedule) S.profile.schedule = {};   // mealId -> [7 locations Mon..Sun]
+ensureSchedule();
 
 /* ---------------- NAV ---------------- */
 let curTab = "plan", curDay = 0;
@@ -414,6 +441,7 @@ const HEAD = {
   recipes: ["Tap a meal for the recipe","Recipes","Macros, ingredients, and quick steps"],
   shop:    ["Broken out by store","Shopping List","Pick a store per item · add your own stores"],
   prefs:   ["Your likes & dislikes","Preferences","Export to update future meal plans"],
+  profile: ["Stored only on this device","Profile","Goal, eating window, meal times & weekly location"],
 };
 function setHead(){ const h=HEAD[curTab]; document.getElementById("hd-eyebrow").textContent=h[0]; document.getElementById("hd-title").textContent=h[1]; document.getElementById("hd-sub").textContent=h[2]; }
 
@@ -424,6 +452,7 @@ function render(){
   if (curTab==="recipes") renderRecipes();
   if (curTab==="shop") renderShop();
   if (curTab==="prefs") renderPrefs();
+  if (curTab==="profile") renderProfile();
 }
 
 function mealFor(dayIdx, slot){
@@ -458,10 +487,11 @@ function renderPlan(){
   SLOTS.forEach(([slot,label,time])=>{
     const m = mealFor(curDay,slot);
     const fb = S.mealFb[m.id];
+    const dtime = slot==='snack' ? 'flex' : (fmtTime(pmTime(slot)) || time);
     html += `<div class="card">
       <div class="row spread">
         <div class="grow">
-          <div class="slot-label">${label} · ${time}</div>
+          <div class="slot-label">${label} · ${dtime}</div>
           <div class="meal-name">${m.name}</div>
           <div class="macros"><span><b>${m.m[0]}</b> kcal</span><span><b>${m.m[1]}g</b> protein</span><span>${m.m[2]}g C</span><span>${m.m[3]}g F</span></div>
         </div>
@@ -692,6 +722,14 @@ function exportPrefs(){
   const favIngr = (S.customItems||[]).map(c=>`- ${c.name}${S.store[c.name]?` — ${S.store[c.name]}`:""}`);
   const storeAssign = Object.keys(S.store).map(n=>`- ${n} → ${S.store[n]}`);
   const L = (a)=> a.length? a.map(x=>`- ${x}`).join("\n") : "- (none)";
+  const pf = S.profile;
+  const goalText = pf.goal==="lose"?"Lose weight":pf.goal==="maintain"?"Maintain":pf.goal==="build"?"Build muscle":(pf.goalCustom||"Custom");
+  const mealsLine = sortedMeals().map(m=>`${m.label} ${fmtTime(m.time)}`).join(", ");
+  const locLines = sortedMeals().map(m=>{
+    const arr=(S.profile.schedule[m.id]||[]);
+    const set=arr.map((l,i)=> l?`${PDAYS[i]} ${l==="home"?"Home":l==="work"?"Work":"On-the-go"}`:null).filter(Boolean);
+    return `  - ${m.label}: ${set.length?set.join(" · "):"(not set)"}`;
+  }).join("\n");
   const md =
 `---
 type: inbox
@@ -701,6 +739,13 @@ tags: [meal-feedback, preferences]
 ---
 
 # Meal Feedback — PROJ-014 (exported ${today})
+
+## Profile (local; shared only via this export)
+- Goal: ${goalText}
+- Eating window: ${fmtTime(pf.windowStart)} – ${fmtTime(pf.windowEnd)}
+- Meals & times: ${mealsLine}
+- Weekly eating locations:
+${locLines}
 
 ## Favorite meals (user-added — prioritize)
 ${favMeals.length? favMeals.join("\n") : "- (none)"}
@@ -738,6 +783,74 @@ _Reminder: no fish or seafood (allergy). Target ~1,600 kcal / ~145g protein, 10a
   a.download = `meal-feedback-${today}.txt`;
   document.body.appendChild(a); a.click(); a.remove();
 }
+
+/* ---------------- PROFILE ---------------- */
+const PDAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+function ensureSchedule(){
+  S.profile.schedule = S.profile.schedule || {};
+  (S.profile.meals||[]).forEach(m=>{ const a=S.profile.schedule[m.id]; if(!Array.isArray(a)||a.length!==7) S.profile.schedule[m.id]=["","","","","","",""]; });
+  Object.keys(S.profile.schedule).forEach(k=>{ if(!(S.profile.meals||[]).some(m=>m.id===k)) delete S.profile.schedule[k]; });
+}
+function fmtTime(t){ if(!t) return ""; const p=String(t).split(":"); let h=+p[0], m=+p[1]||0; const ap=h<12?"AM":"PM"; let hh=h%12; if(hh===0)hh=12; return hh+":"+String(m).padStart(2,"0")+" "+ap; }
+function pmTime(id){ const mm=(S.profile.meals||[]).find(x=>x.id===id); return mm?mm.time:""; }
+function sortedMeals(){ return (S.profile.meals||[]).slice().sort((a,b)=>(a.time||"").localeCompare(b.time||"")); }
+function hoursBetween(a,b){ const pa=(a||"0:0").split(":"), pb=(b||"0:0").split(":"); let d=(+pb[0]*60+ +pb[1])-(+pa[0]*60+ +pa[1]); if(d<0)d+=1440; return Math.round(d/60*10)/10; }
+function eatHours(){ return hoursBetween(S.profile.windowStart,S.profile.windowEnd); }
+function locIcon(l){ return l==="home"?"🏠":l==="work"?"💼":l==="go"?"🚗":"·"; }
+function shortLabel(m){ if(m.type==="snack") return "Snack"; return {breakfast:"Bfast",lunch:"Lunch",dinner:"Dinner"}[m.id]||m.label; }
+
+function renderProfile(){
+  const el = document.getElementById("panel-profile");
+  const p = S.profile;
+  let html = "";
+
+  // Goal
+  const goals = [["lose","Lose weight"],["maintain","Maintain"],["build","Build muscle"],["custom","Custom…"]];
+  html += `<div class="seclabel">Goal</div><div class="card">
+    <select class="store-select" style="width:100%;max-width:none" onchange="setGoal(this.value)">
+      ${goals.map(([v,l])=>`<option value="${v}" ${p.goal===v?"selected":""}>${l}</option>`).join("")}
+    </select>
+    ${p.goal==="custom"?`<input type="text" placeholder="Describe your goal" value="${(p.goalCustom||"").replace(/"/g,"&quot;")}" oninput="S.profile.goalCustom=this.value;save()" style="width:100%;border:none;background:var(--fill-2);border-radius:11px;padding:12px 13px;font-size:15px;color:var(--text);font-family:inherit;margin-top:8px;box-sizing:border-box">`:""}
+  </div>`;
+
+  // Eating window
+  html += `<div class="seclabel">Eating window</div><div class="card">
+    <div class="row spread"><span class="sb">Start</span><input type="time" class="time-in" value="${p.windowStart}" onchange="setWindow('start',this.value)"></div>
+    <div class="row spread" style="margin-top:10px"><span class="sb">End</span><input type="time" class="time-in" value="${p.windowEnd}" onchange="setWindow('end',this.value)"></div>
+    <div class="muted small" style="margin-top:8px">${eatHours()}-hour eating window · ${Math.round((24-eatHours())*10)/10}-hour fast.</div>
+  </div>`;
+
+  // Meals & times
+  html += `<div class="seclabel">Meals & times</div><div class="card">`;
+  sortedMeals().forEach(m=>{
+    html += `<div class="fav-item">
+      <div class="grow"><span class="sb">${m.label}</span>${m.type==="snack"?` <span class="tiny" style="color:var(--green)">snack</span>`:""}</div>
+      <input type="time" class="time-in" value="${m.time}" onchange="setMealTime('${m.id}',this.value)">
+      ${m.type==="snack"?`<button class="rm" onclick="removeMeal('${m.id}')">✕</button>`:`<span style="width:34px;display:inline-block"></span>`}
+    </div>`;
+  });
+  html += `<button class="btn sec" style="margin-top:10px" onclick="addSnack()">+ Add snack</button></div>`;
+
+  // Weekly location
+  html += `<div class="seclabel">Weekly location</div><div class="card">
+    <div class="muted tiny" style="margin-bottom:8px">Tap a cell to cycle: · none → 🏠 Home → 💼 Work → 🚗 On the go</div>
+    <div class="loc-grid"><div></div>${PDAYS.map(d=>`<div class="loc-head">${d[0]}</div>`).join("")}`;
+  sortedMeals().forEach(m=>{
+    const arr = S.profile.schedule[m.id]||["","","","","","",""];
+    html += `<div class="loc-row-label">${shortLabel(m)}</div>`;
+    arr.forEach((loc,di)=>{ html += `<button class="loc-cell ${loc}" onclick="cycleLoc('${m.id}',${di})">${locIcon(loc)}</button>`; });
+  });
+  html += `</div></div>`;
+
+  html += `<p class="muted small" style="text-align:center;margin:12px 4px 4px">🔒 Your profile is stored only on this device. It's shared with Claude only when you tap Export in the Prefs tab.</p>`;
+  el.innerHTML = html;
+}
+function setGoal(v){ S.profile.goal=v; save(); renderProfile(); }
+function setWindow(which,v){ if(which==="start")S.profile.windowStart=v; else S.profile.windowEnd=v; save(); renderProfile(); }
+function setMealTime(id,v){ const m=(S.profile.meals||[]).find(x=>x.id===id); if(m)m.time=v; save(); renderProfile(); }
+function addSnack(){ S.profile.meals.push({id:"snack-"+Date.now(), label:"Snack", time:"16:00", type:"snack"}); ensureSchedule(); save(); renderProfile(); }
+function removeMeal(id){ S.profile.meals=(S.profile.meals||[]).filter(m=>m.id!==id); delete S.profile.schedule[id]; save(); renderProfile(); }
+function cycleLoc(id,di){ ensureSchedule(); const order=["","home","work","go"]; const cur=S.profile.schedule[id][di]||""; S.profile.schedule[id][di]=order[(order.indexOf(cur)+1)%order.length]; save(); renderProfile(); }
 
 /* ---------------- SHEET ---------------- */
 function openSheet(){ document.getElementById("sheet-bg").classList.add("open"); document.getElementById("sheet").classList.add("open"); }
