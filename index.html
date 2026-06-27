@@ -639,7 +639,7 @@ function renderPrefs(){
   <div class="card"><textarea id="notes" placeholder="Anything else — foods you're sick of, things you'd love to see, allergies (remember: no fish/seafood)…" oninput="S.notes=this.value;save()">${S.notes||""}</textarea></div>
 
   <button class="btn" onclick="exportPrefs()">⬇️ Export feedback for Claude</button>
-  <p class="muted small" style="text-align:center;margin:2px 0 16px">Downloads a dated <b>.md</b> file. Drop it into <b>second_brain/inbox/</b> and tell Claude to ingest it — your next meal plan will honor these.</p>
+  <p class="muted small" style="text-align:center;margin:2px 0 16px">Downloads a dated <b>.txt</b> file. Drop it into <b>second_brain/inbox/</b> and tell Claude to ingest it — your next meal plan will honor these.</p>
   <button class="btn sec" onclick="if(confirm('Clear all feedback and selections on this device?')){localStorage.removeItem(KEY);S=loadState();location.reload();}">Reset all data</button>`;
   el.innerHTML = html;
 }
@@ -732,10 +732,10 @@ ${S.notes ? S.notes : "(none)"}
 ---
 _Reminder: no fish or seafood (allergy). Target ~1,600 kcal / ~145g protein, 10am–8pm window. Stores: Trader Joe's, Costco, Sprouts, Amazon + any custom above._
 `;
-  const blob = new Blob([md], {type:"text/markdown"});
+  const blob = new Blob([md], {type:"text/plain"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `meal-feedback-${today}.md`;
+  a.download = `meal-feedback-${today}.txt`;
   document.body.appendChild(a); a.click(); a.remove();
 }
 
